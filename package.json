@@ -1,0 +1,20 @@
+{
+  "name": "oav",
+  "version": "1.0.0",
+  "description": "This package allow to \"see\" the environment using sounds",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "vision",
+    "audio",
+    "three"
+  ],
+  "author": "Itee",
+  "license": "MIT",
+  "dependencies": {
+    "dat.gui": "^0.7.6",
+    "three-full": "^17.1.0"
+  }
+}

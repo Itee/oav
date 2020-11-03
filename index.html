@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+        <title>V.A.O</title>
+        <style>
+            body {
+                color:            #ffffff;
+                font-family:      Monospace;
+                font-size:        13px;
+                text-align:       center;
+                font-weight:      bold;
+                background-color: #000000;
+                margin:           0px;
+                overflow:         hidden;
+            }
+
+            #overlay {
+                position:         absolute;
+                z-index:          1;
+                top:              0;
+                left:             0;
+                width:            100%;
+                height:           100%;
+                display:          flex;
+                align-items:      center;
+                justify-content:  center;
+                opacity:          1;
+                background-color: #000000;
+                color:            #ffffff;
+            }
+
+            #overlay > div {
+                text-align: center;
+            }
+
+            #overlay > div > button {
+                height:     20px;
+                width:      100px;
+                background: transparent;
+                color:      #ffffff;
+                outline:    1px solid #ffffff;
+                border:     0px;
+                cursor:     pointer;
+            }
+
+            #overlay > div > p {
+                color:     #777777;
+                font-size: 12px;
+            }
+        </style>
+    </head>
+    <body>
+        <audio loop id="music" preload="auto" style="display: none">
+            <!--<source src="sounds/La.ogg" type="audio/ogg">-->
+            <source src="sounds/The_Riders_-_Bring_me_the_lite.mp3" type="audio/mpeg">
+<!--            <source src="sounds/Love Death + Robots.mp3" type="audio/mpeg">-->
+        </audio>
+        <div id="overlay">
+            <div>
+                <button id="startButton">Start</button>
+                <p>Automatic audio playback requires a user interaction.</p>
+            </div>
+        </div>
+        <input id="volume" type="range" min="0" max="1" step="0.1" value="0.5" />
+        <div id="container"></div>
+        <script src="node_modules/three-full/builds/Three.iife.js"></script>
+        <script src="node_modules/dat.gui/build/dat.gui.js"></script>
+        <script>
+            /*global Three, container, dat, window */
+
+            function ThreeApplication ( container ) {
+
+                if ( !container ) {
+                    throw new Error( 'Three Application required a container' )
+                }
+
+                this.container = container
+
+                initRenderer.call( this )
+                initCamera.call( this )
+                initScene.call( this )
+                initAudio.call( this )
+                initDatGui.call( this )
+
+                this.update()
+
+                function initRenderer () {
+
+                    this.renderer = new Three.WebGLRenderer( { antialias: true } )
+                    this.renderer.setPixelRatio( window.devicePixelRatio )
+                    this.renderer.setSize( window.innerWidth, window.innerHeight )
+                    this.renderer.shadowMap.enabled = true
+                    this.renderer.shadowMap.type    = Three.PCFSoftShadowMap
+
+                    this.container.appendChild( this.renderer.domElement )
+
+                }
+
+                function initCamera () {
+
+                    this.camera = new Three.PerspectiveCamera( 70, this.getAspectRatio(), 0.001, 80000 )
+                    this.camera.position.set( -5, 5, 5 )
+
+                    this.cameraControls = new Three.OrbitControls( this.camera, this.renderer.domElement )
+                    this.cameraControls.addEventListener( 'change', this.renderApp.bind( this ) )
+
+                }
+
+                function initScene () {
+
+                    // SCENE
+                    this.scene            = new Three.Scene()
+                    this.scene.background = new Three.Color( 0x000000 )
+
+                    // LIGHTS
+                    this.ambientLight         = new Three.AmbientLight( 0xcccccc )
+                    this.ambientLight.name    = 'AmbiantLight'
+                    this.ambientLight.visible = true
+                    this.scene.add( this.ambientLight )
+
+                    this.spotLightBack      = new Three.SpotLight( 0xffffff, 0.8, 75, 0.3, 0.1, 1.5 )
+                    this.spotLightBack.name = 'SpotLightBack'
+                    this.spotLightBack.position.set( -15, 15, -15 )
+                    this.spotLightBack.castShadow            = true
+                    this.spotLightBack.shadow.mapSize.width  = 1024
+                    this.spotLightBack.shadow.mapSize.height = 1024
+                    this.spotLightBack.shadow.camera.near    = 10
+                    this.spotLightBack.shadow.camera.far     = 200
+                    this.scene.add( this.spotLightBack )
+
+                }
+
+                function initAudio () {
+
+                    this.useWaveform  = true
+                    this.useFrequency = true
+
+                    // 62 -> 32768
+
+
+                    //                                        initWaveformCloud.call( this )
+                    initWaveformLine.call( this )
+                    //                                                            initFrequencyCloud.call( this )
+                                        initFrequencyMap.call( this )
+
+                    function initWaveformCloud () {
+
+                        this.currentWaveformBufferIndex = 0
+                        this.waveformCycles             = 200
+                        this.waveforms                  = new Three.Group()
+
+                        for ( let waveIndex = 0 ; waveIndex < this.waveformCycles ; waveIndex++ ) {
+
+                            // Using bufferd line
+                            const geometry     = new Three.BufferGeometry()
+                            const material     = new Three.PointsMaterial( {
+                                vertexColors: Three.VertexColors,
+                                size:         0.001
+                            } )
+                            const positions    = []
+                            const colors       = []
+                            const globalOffset = waveIndex * ( halfFftLength / 1000 )
+
+                            for ( let x = 0 ; x < halfFftLength ; x++ ) {
+
+                                const globalXPosition = globalOffset + ( x / 1000 )
+                                positions.push( globalXPosition, 0, 0 )
+                                colors.push( 1, 1, 1 )
+
+                            }
+
+                            const bufferPositionAttribute = new Three.Float32BufferAttribute( positions, 3 )
+                            bufferPositionAttribute.setDynamic( true )
+                            geometry.addAttribute( 'position', bufferPositionAttribute )
+
+                            const bufferColorAttribute = new Three.Float32BufferAttribute( colors, 3 )
+                            bufferColorAttribute.setDynamic( true )
+                            geometry.addAttribute( 'color', bufferColorAttribute )
+
+                            //                            let boundingBoxCenter = new Three.Vector3()
+                            this.waveform = new Three.Points( geometry, material )
+                            //                            this.waveform = new Three.Points( geometry, material )
+                            //                            this.waveform.geometry.computeBoundingBox()
+                            //                            this.waveform.geometry.boundingBox.getCenter( boundingBoxCenter )
+                            //                            this.waveform.position.x = -boundingBoxCenter.x
+                            //                            this.waveform.position.y = 2
+                            //                            this.waveform.position.z = -3
+
+                            this.waveforms.add( this.waveform )
+
+                        }
+
+                        const boundingBox     = new Three.Box3()
+                        let boundingBoxCenter = new Three.Vector3()
+                        boundingBox.setFromObject( this.waveforms )
+                        boundingBox.getCenter( boundingBoxCenter )
+
+                        this.waveforms.position.x = -boundingBoxCenter.x
+                        this.waveforms.position.y = 2
+                        this.waveforms.position.z = -3
+
+                        this.scene.add( this.waveforms )
+
+                    }
+
+                    function initWaveformLine () {
+
+                        this.fftWaveformLength      = 4096
+                        const halfFftLength = this.fftWaveformLength / 2
+                        this.currentWaveformBufferIndex = 0
+                        this.waveformCycles             = 1
+                        this.waveforms                  = new Three.Group()
+
+                        for ( let waveIndex = 0 ; waveIndex < this.waveformCycles ; waveIndex++ ) {
+
+                            // Using bufferd line
+                            const geometry     = new Three.BufferGeometry()
+                            const material     = new Three.LineBasicMaterial( {
+                                vertexColors: Three.VertexColors
+                            } )
+                            const positions    = []
+                            const colors       = []
+                            const globalOffset = waveIndex * ( halfFftLength / 100 )
+
+                            for ( let x = 0 ; x < halfFftLength ; x++ ) {
+
+                                const globalXPosition = globalOffset + ( x / 100 )
+                                positions.push( globalXPosition, 0, 0 )
+                                colors.push( 1, 1, 1 )
+
+                            }
+
+                            const bufferPositionAttribute = new Three.Float32BufferAttribute( positions, 3 )
+                            bufferPositionAttribute.setDynamic( true )
+                            geometry.addAttribute( 'position', bufferPositionAttribute )
+
+                            const bufferColorAttribute = new Three.Float32BufferAttribute( colors, 3 )
+                            bufferColorAttribute.setDynamic( true )
+                            geometry.addAttribute( 'color', bufferColorAttribute )
+
+                            //                            let boundingBoxCenter = new Three.Vector3()
+                            this.waveform = new Three.Line( geometry, material )
+                            //                            this.waveform = new Three.Points( geometry, material )
+                            //                            this.waveform.geometry.computeBoundingBox()
+                            //                            this.waveform.geometry.boundingBox.getCenter( boundingBoxCenter )
+                            //                            this.waveform.position.x = -boundingBoxCenter.x
+                            //                            this.waveform.position.y = 2
+                            //                            this.waveform.position.z = -3
+
+                            this.waveforms.add( this.waveform )
+
+                        }
+
+                        const boundingBox     = new Three.Box3()
+                        let boundingBoxCenter = new Three.Vector3()
+                        boundingBox.setFromObject( this.waveforms )
+                        boundingBox.getCenter( boundingBoxCenter )
+
+                        this.waveforms.position.x = -boundingBoxCenter.x
+                        this.waveforms.position.y = 1
+                        this.waveforms.position.z = -1
+
+                        this.scene.add( this.waveforms )
+
+                    }
+
+                    function initFrequencyCloud () {
+
+                        this.fftLength      = 512
+                        const halfFftLength = this.fftLength / 2
+                        this.audioBufferLength       = 3000
+                        this.currentAudioBufferIndex = 0
+
+                        // Using bufferd line
+                        const geometry  = new Three.BufferGeometry()
+                        const material  = new Three.PointsMaterial( {
+                            vertexColors: Three.VertexColors,
+                            size:         0.01
+                        } )
+                        const positions = []
+                        const colors    = []
+
+                        for ( let x = 0 ; x < this.audioBufferLength ; x++ ) {
+
+                            for ( let z = 0 ; z < halfFftLength ; z++ ) {
+
+                                positions.push( x / 100, 0, z / 100 )
+                                colors.push( 1, 1, 1 )
+
+                            }
+
+                        }
+
+                        const bufferPositionAttribute = new Three.Float32BufferAttribute( positions, 3 )
+                        bufferPositionAttribute.setDynamic( true )
+                        geometry.addAttribute( 'position', bufferPositionAttribute )
+
+                        const bufferColorAttribute = new Three.Float32BufferAttribute( colors, 3 )
+                        bufferColorAttribute.setDynamic( true )
+                        geometry.addAttribute( 'color', bufferColorAttribute )
+
+                        let boundingBoxCenter = new Three.Vector3()
+                        this.soundMap         = new Three.Points( geometry, material )
+                        this.soundMap.geometry.computeBoundingBox()
+                        this.soundMap.geometry.boundingBox.getCenter( boundingBoxCenter )
+                        this.soundMap.position.x = -boundingBoxCenter.x
+                        this.soundMap.position.y = -boundingBoxCenter.y
+                        this.soundMap.position.z = -boundingBoxCenter.z
+
+                        this.scene.add( this.soundMap )
+
+                    }
+
+                    function initFrequencyMap () {
+
+                        this.fftLength      = 512
+                        const halfFftLength = this.fftLength / 2
+                        this.audioBufferLength       = 2000
+                        this.currentAudioBufferIndex = 0
+
+                        // Using bufferd line
+                        const geometry = new Three.BufferGeometry()
+                        const material = new Three.MeshPhongMaterial( {
+                            vertexColors: Three.VertexColors
+                        } )
+
+                        const positions = []
+                        const colors    = []
+                        const indexes   = []
+
+                        for ( let x = 0 ; x < this.audioBufferLength ; x++ ) {
+
+                            for ( let z = 0 ; z < halfFftLength ; z++ ) {
+
+                                positions.push( x / 100, 0, z / 100 )
+                                colors.push( 1, 1, 1 )
+
+                            }
+
+                            // avoid extra indexes
+                            if ( x === this.audioBufferLength - 1 ) {
+                                break
+                            }
+
+                            const globalIndex = ( x * halfFftLength )
+                            for ( let i = 0 ; i < halfFftLength - 1 ; i++ ) {
+
+                                indexes.push( globalIndex + i, globalIndex + i + 1, globalIndex + i + halfFftLength )
+                                indexes.push( globalIndex + i + 1, globalIndex + i + halfFftLength + 1, globalIndex + i + halfFftLength )
+
+                            }
+
+                        }
+
+                        const bufferPositionAttribute = new Three.Float32BufferAttribute( positions, 3 )
+                        bufferPositionAttribute.setDynamic( true )
+                        geometry.addAttribute( 'position', bufferPositionAttribute )
+
+                        const bufferColorAttribute = new Three.Float32BufferAttribute( colors, 3 )
+                        bufferColorAttribute.setDynamic( true )
+                        geometry.addAttribute( 'color', bufferColorAttribute )
+
+                        geometry.setIndex( indexes )
+
+                        let boundingBoxCenter    = new Three.Vector3()
+                        this.soundMap            = new Three.Mesh( geometry, material )
+                        this.soundMap.castShadow = true
+                        this.soundMap.geometry.computeBoundingBox()
+                        this.soundMap.geometry.boundingBox.getCenter( boundingBoxCenter )
+                        this.soundMap.position.x = -boundingBoxCenter.x
+                        this.soundMap.position.y = -boundingBoxCenter.y
+                        this.soundMap.position.z = -boundingBoxCenter.z
+
+                        this.scene.add( this.soundMap )
+
+                    }
+
+                    // AUD Stuff
+                    this.audioElement = document.getElementById( 'music' )
+
+                    this.audioListener = new Three.AudioListener()
+                    this.camera.add( this.audioListener )
+
+                    this.audio = new Three.Audio( this.audioListener )
+                    this.scene.add( this.audio )
+
+                    this.audioAnalyser = new Three.AudioAnalyser( this.audio, this.fftLength )
+                    this.waveAnalyser = new Three.AudioAnalyser( this.audio, this.fftWaveformLength )
+
+                    // Get microphone data
+                    /*
+                     navigator.mediaDevices.getUserMedia( { audio: true } ).then( stream => {
+
+                     const microphoneStream = this.audioListener.context.createMediaStreamSource( stream )
+                     this.audio.setNodeSource( microphoneStream )
+
+                     } ).catch( err => {
+
+                     alert( err )
+
+                     } )
+                     */
+
+                    // Or Music
+
+//                    this.audioElement = document.getElementById( 'music' )
+                    this.audioElement = new Audio( 'sounds/Love Death + Robots.mp3' )
+                    this.audioElement.loop = true
+
+                    this.audio.setMediaElementSource( this.audioElement )
+                    this.audioElement.play()
+
+                    /*
+                     this.audioElement = document.getElementById( 'music' )
+
+                     this.audioListener = new Three.AudioListener()
+                     this.camera.add( this.audioListener )
+
+                     this.positionalAudio = new Three.PositionalAudio( this.audioListener )
+                     this.positionalAudio.setMediaElementSource( this.audioElement )
+                     this.positionalAudio.setRefDistance( 1 )
+                     //                    this.positionalAudio.setDirectionalCone( 180, 230, 0.1 )
+
+                     this.positionalAudioHelper = new Three.PositionalAudioHelper( this.positionalAudio, 0.1 )
+                     this.positionalAudio.add( this.positionalAudioHelper )
+
+                     this.audioAnalyser = new Three.AudioAnalyser( this.positionalAudio, this.fftLength )
+
+                     this.scene.add( this.positionalAudio )
+                     */
+
+                }
+
+                function initDatGui () {
+
+                    var GuiInterface = function () {
+
+                        // Geometries
+                        this.bufferGeometries = {
+
+                            Plane:  new Three.PlaneBufferGeometry( 1, 1 ),
+                            Circle: new Three.CircleBufferGeometry( 1 ),
+                            Ring:   new Three.RingBufferGeometry( 1, 2 ),
+
+                            Box:       new Three.BoxBufferGeometry( 1, 1, 1 ),
+                            Sphere:    new Three.SphereBufferGeometry( 1 ),
+                            Cone:      new Three.ConeBufferGeometry( 1, 1 ),
+                            Cylinder:  new Three.CylinderBufferGeometry( 1, 1, 1 ),
+                            Tube:      new Three.TubeBufferGeometry( new Three.LineCurve( new Three.Vector3( 0, -1, 0 ), new Three.Vector3( 0, 1, 0 ) ) ),
+                            Torus:     new Three.TorusBufferGeometry( 1, 0.7, 20, 20 ),
+                            TorusKnot: new Three.TorusKnotBufferGeometry( 1, 0.1 ),
+
+                            Tetrahedron:  new Three.TetrahedronBufferGeometry(),
+                            Icosahedron:  new Three.IcosahedronBufferGeometry(),
+                            Octahedron:   new Three.OctahedronBufferGeometry(),
+                            Dodecahedron: new Three.DodecahedronBufferGeometry()
+
+                            // Todo: Text: new Three.TextGeometry( 'Three.js' )
+                        }
+
+                        this.geometry = 'Box'
+
+                        // Materials
+                        this.materials = {
+                            Basic:    new Three.MeshBasicMaterial( { side: Three.DoubleSide } ),
+                            Depth:    new Three.MeshDepthMaterial( { side: Three.DoubleSide } ),
+                            Lambert:  new Three.MeshLambertMaterial( { side: Three.DoubleSide } ),
+                            Normal:   new Three.MeshNormalMaterial( { side: Three.DoubleSide } ),
+                            Phong:    new Three.MeshPhongMaterial( { side: Three.DoubleSide } ),
+                            Physical: new Three.MeshPhysicalMaterial( { side: Three.DoubleSide } ),
+                            Standard: new Three.MeshStandardMaterial( { side: Three.DoubleSide } ),
+                            Toon:     new Three.MeshToonMaterial( { side: Three.DoubleSide } )
+                        }
+
+                        this.material         = 'Normal'
+                        this.displayWireFrame = true
+
+                        this.materialSides = {
+                            Front:  Three.FrontSide,
+                            Back:   Three.BackSide,
+                            Double: Three.DoubleSide
+                        }
+                        this.materialSide  = 'Double'
+                        this.materialColor = '#dedede'
+
+                        // Mesh
+                        this.meshShadow = true
+
+                        // Audio
+                        this.toggleAudio = true
+
+                        // Helpers
+                        this.displayVertexNormalHelper = false
+
+                    }
+
+                    this.interface = new GuiInterface()
+
+                    this.gui = new dat.GUI( {
+                        width: 320
+                    } )
+
+                    var folderEnvironment = this.gui.addFolder( 'Environment' )
+                    folderEnvironment.add( this.ambientLight, 'visible' ).name( 'Ambiant light' )
+                    //                    folderEnvironment.add( this.spotLightFront, 'visible' ).name( 'Front spot light' )
+                    //                    folderEnvironment.add( this.spotLightBack, 'visible' ).name( 'Back spot light' )
+                    //                    folderEnvironment.add( this.ground, 'visible' ).name( 'Display ground' )
+
+                    var folderMesh = this.gui.addFolder( 'Mesh' )
+                    folderMesh.add( this.interface, 'geometry', Object.keys( this.interface.bufferGeometries ) ).name( 'Geometry' ).onChange( this.update.bind( this ) )
+                    folderMesh.add( this.interface, 'meshShadow' ).name( 'Shadow' ).onChange( this.updateShadow.bind( this ) )
+                    folderMesh.add( this.interface, 'material', Object.keys( this.interface.materials ) ).name( 'Materials' ).onChange( this.updateMaterial.bind( this ) )
+                    folderMesh.add( this.interface, 'displayWireFrame' ).name( 'Wireframe' ).onChange( this.updateMaterialWireframe.bind( this ) )
+                    folderMesh.add( this.interface, 'materialSide', Object.keys( this.interface.materialSides ) ).name( 'Side' ).onChange( this.update.bind( this ) )
+                    folderMesh.addColor( this.interface, 'materialColor' ).name( 'Color' ).onChange( this.update.bind( this ) )
+
+                    var folderAudio = this.gui.addFolder( 'Audio' )
+                    folderAudio.add( this.interface, 'toggleAudio' ).name( 'Start/Stop audio' ).onChange( this.update.bind( this ) )
+                    folderAudio.add( this, 'fftLength' ).name( 'FFT Width' ).onChange( this.updateAudio.bind( this ) )
+//                    folderAudio.add( this, 'audioBufferLength' ).name( 'FFT Length' ).onChange( this.updateAudio.bind( this ) )
+                    folderAudio.add( this, 'useFrequency' ).name( 'Display Frequency' )//.onChange( this.updateAudio.bind( this ) )
+                    folderAudio.add( this, 'useWaveform' ).name( 'Display Waveform' )//.onChange( this.updateAudio.bind( this ) )
+
+                    var folderHelper = this.gui.addFolder( 'Helpers' )
+                    folderHelper.add( this.interface, 'displayVertexNormalHelper' ).name( 'Vertex normals' ).onChange( this.update.bind( this ) )
+
+                    // Keep in mind to disable/enable - hide/show dat.gui controls
+                    //
+                    //			control.domElement.style.pointerEvents = "none"
+                    //			control.domElement.children[ 0 ].disabled = true
+                    //			control.domElement.addEventListener("click", function( event ) {
+                    //
+                    //				event.stopPropagation();
+                    //				event.preventDefault();
+                    //
+                    //			}, true);
+                    //
+                    //			// For slider
+                    //			control.domElement.style.pointerEvents = "none"
+                    //			control.domElement.style.opacity = .5;
+                }
+
+            }
+
+            Object.assign( ThreeApplication.prototype, {
+
+                constructor: ThreeApplication,
+
+                // Updates
+                update () {
+
+                    //                    this.updateAudio()
+
+                },
+
+                updateShadow () {
+
+                    if ( !this.soundMap ) { return}
+
+                    this.soundMap.castShadow = this.interface.meshShadow
+
+                },
+
+                updateAudio () {
+
+                    if ( this.audioElement ) {
+
+                        if ( this.interface.toggleAudio ) {
+                            this.audioElement.play()
+                        } else {
+                            this.audioElement.pause()
+                        }
+
+                    }
+
+                    /*
+                     const halfFftLength          = this.fftLength / 2
+                     this.currentAudioBufferIndex = 0
+
+                     // Using bufferd line
+                     const geometry  = new Three.BufferGeometry()
+                     const material  = new Three.PointsMaterial( {
+                     vertexColors: Three.VertexColors,
+                     size:         0.01
+                     } )
+                     const positions = []
+                     const colors    = []
+
+                     for ( let x = 0 ; x < this.audioBufferLength ; x++ ) {
+
+                     for ( let z = 0 ; z < halfFftLength ; z++ ) {
+
+                     positions.push( x / 100, 0, z / 100 )
+                     colors.push( 1, 1, 1 )
+
+                     }
+
+                     }
+
+                     const bufferPositionAttribute = new Three.Float32BufferAttribute( positions, 3 )
+                     bufferPositionAttribute.setDynamic( true )
+                     geometry.addAttribute( 'position', bufferPositionAttribute )
+
+                     const bufferColorAttribute = new Three.Float32BufferAttribute( colors, 3 )
+                     bufferColorAttribute.setDynamic( true )
+                     geometry.addAttribute( 'color', bufferColorAttribute )
+
+                     let boundingBoxCenter  = new Three.Vector3()
+                     this.soundMap.geometry = geometry
+                     this.soundMap.material = material
+                     this.soundMap.geometry.computeBoundingBox()
+                     this.soundMap.geometry.boundingBox.getCenter( boundingBoxCenter )
+                     this.soundMap.position.x = -boundingBoxCenter.x
+                     this.soundMap.position.y = -boundingBoxCenter.y
+                     this.soundMap.position.z = -boundingBoxCenter.z
+
+                     this.audioAnalyser.analyser.fftSize = this.fftLength
+                     */
+
+                },
+
+                updateMaterial () {
+
+                    this.soundMap.material = this.interface.materials[ this.interface.material ]
+                    this.updateMaterialWireframe()
+                    this.soundMap.material.needsUpdate = true
+
+                    this.soundMap.material.vertexColors = Three.VertexColors
+                    // or
+                    //                    if ( this.soundMap.material.color !== undefined ) {
+                    //                        this.soundMap.material.color = new Three.Color( this.interface.materialColor )
+                    //                    }
+
+                },
+
+                updateMaterialWireframe () {
+
+                    this.soundMap.material.wireframe = this.interface.displayWireFrame
+
+                },
+
+                // Utils
+                getAspectRatio () {
+
+                    return ( this.container.offsetHeight === 0 ) ? 1 : this.container.offsetWidth / this.container.offsetHeight
+
+                },
+
+                resize () {
+
+                    this.renderer.setSize( this.container.offsetWidth, this.container.offsetHeight, false )
+
+                    this.camera.aspect = this.getAspectRatio()
+                    this.camera.updateProjectionMatrix()
+
+                },
+
+                renderApp () {
+
+                    this.renderer.render( this.scene, this.camera )
+
+                    // Update fft display
+
+                    if ( this.useWaveform ) {
+
+                        this.waveAnalyser.analyser.getByteTimeDomainData( this.waveAnalyser.data )
+                        const waveDatas = this.waveAnalyser.data
+
+                        const waveform                = this.waveforms.children[ this.currentWaveformBufferIndex ]
+                        const positionBufferAttribute = waveform.geometry.getAttribute( 'position' )
+                        const positionBuffer          = positionBufferAttribute.array
+                        const colorBufferAttribute    = waveform.geometry.getAttribute( 'color' )
+                        const colorBuffer             = colorBufferAttribute.array
+
+                        for ( let i = 0, bi = 0, dataLength = waveDatas.length ; i < dataLength ; i++, bi += 3 ) {
+
+                            const waveData = waveDatas[ i ]
+
+                            //positionBuffer[ bi + 0 ]
+                            positionBuffer[ bi + 1 ] = ( waveData / 255 )
+                            //positionBuffer[ bi + 2 ]
+
+                            colorBuffer[ bi + 0 ] = waveData / 255
+                            colorBuffer[ bi + 1 ] = ( 255 - waveData ) / 255
+                            colorBuffer[ bi + 2 ] = 0
+
+                        }
+                        positionBufferAttribute.needsUpdate = true
+                        colorBufferAttribute.needsUpdate    = true
+
+                        this.currentWaveformBufferIndex++
+                        if ( this.currentWaveformBufferIndex >= this.waveformCycles ) {
+                            this.currentWaveformBufferIndex = 0
+                        }
+
+                    }
+
+                    if ( this.useFrequency ) {
+
+                        const frequencyDatas = this.audioAnalyser.getFrequencyData()
+
+                        const currentZIndexOffset = ( this.currentAudioBufferIndex * ( this.fftLength / 2 ) )
+
+                        const positionBuffer = this.soundMap.geometry.getAttribute( 'position' )
+                        const colorBuffer    = this.soundMap.geometry.getAttribute( 'color' )
+
+                        for ( let i = 0, dataLength = frequencyDatas.length ; i < dataLength ; i++ ) {
+                            const fftData      = frequencyDatas[ i ]
+                            const currentIndex = ( ( currentZIndexOffset + i ) * 3 )
+
+                            positionBuffer.array[ currentIndex + 1 ] = ( fftData / 255 )
+
+                            colorBuffer.array[ currentIndex + 0 ] = fftData / 255
+                            colorBuffer.array[ currentIndex + 1 ] = ( 255 - fftData ) / 255
+                            colorBuffer.array[ currentIndex + 2 ] = 0
+                        }
+                        positionBuffer.needsUpdate = true
+                        colorBuffer.needsUpdate    = true
+                        this.soundMap.geometry.computeVertexNormals()
+
+                        this.currentAudioBufferIndex++
+                        if ( this.currentAudioBufferIndex >= this.audioBufferLength ) {
+                            this.currentAudioBufferIndex = 0
+                        }
+
+                    }
+
+                    //                    const time                      = Date.now() * 0.0005
+                    //                    this.positionalAudio.position.x = Math.sin( time * 0.5 ) * 30
+                    //                    this.positionalAudio.position.z = Math.cos( time * 0.5 ) * 30
+                    //                    this.positionalAudio.position.z = Math.cos( time * 0.3 ) * 30
+
+                }
+
+            } )
+
+            const startButton = document.getElementById( 'startButton' )
+            startButton.addEventListener( 'click', () => {
+
+                const overlay = document.getElementById( 'overlay' )
+                overlay.remove()
+
+                const container = document.getElementById( 'container' )
+                const app       = new ThreeApplication( container )
+
+                const resizeWindow = function () {
+
+                    app.resize()
+                    app.update()
+
+                }
+
+                const render = function () {
+
+                    requestAnimationFrame( render )
+
+                    app.renderApp()
+
+                }
+
+                window.addEventListener( 'resize', resizeWindow, false )
+
+                render()
+
+            } )
+
+        </script>
+    </body>
+</html>
